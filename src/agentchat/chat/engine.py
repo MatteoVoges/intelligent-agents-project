@@ -24,7 +24,7 @@ from ..memory import store as memory
 from . import prompt
 
 
-async def generate(
+async def generate(  # noqa: C901 — the tool loop and stream demux are one flow; splitting hides it
     conversation,
     user_text: str,
     *,

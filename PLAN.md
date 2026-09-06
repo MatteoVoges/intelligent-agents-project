@@ -6,21 +6,28 @@ Status legend: ☐ todo · ◐ in progress · ☑ done
 2026-07-23. Phases are sized so the core (required features) is demoable well before electives, and
 electives before polish. Fine-tuning starts early because it's the highest-risk / longest-lead item.
 
-## Build status (2026-07-23)
+## Build status (2026-09-07)
 
-Initial scaffold + functional implementation of Phases 0–7 written and syntax-validated. **Not yet
-run against a live vLLM/GPU** — the remaining work per phase is hardware-in-the-loop validation and
-tuning, not greenfield coding.
+Now running on real hardware (RTX 4060 Ti 16GB, WSL2 Ubuntu-24.04, vLLM 0.25.1, CUDA 13).
 
-- Phases 0–3 (scaffold, chat, model switch, memory): code complete → needs a real vLLM run to verify.
-- Phase 4 (2 persona LoRAs): pipeline + configs + sample data ready → **needs actual training + the
-  QLoRA↔AWQ compat gate.**
-- Phase 5 (tool-calling) & 6 (multi-user): implemented → needs live verification + isolation/load test.
-- Phase 7 (packaging, README, tests): README + dependency-free tests done → needs clean-clone `uv sync`.
-- Phase 8 (demo/hand-in): not started.
+- Phases 0–3 (scaffold, chat, model switch, memory): **verified live.** vLLM serves
+  Qwen2.5-7B-Instruct-AWQ; memory recall answers correctly in a conversation that never saw the
+  facts. See `wsl/verify.sh`.
+- Phase 4 (2 persona LoRAs): **done and verified.** Both adapters trained (QLoRA NF4, r=16,
+  10 epochs, 40.4M trainable params, 80.8 MB each). **The QLoRA↔AWQ gate passed** — vLLM serves
+  `qwen2.5-7b`, `persona-a`, `persona-b` together, and on a held-out question the base answers in
+  prose while persona-a emits `VERDICT:` + severity bullets and persona-b an analogy + steps.
+  The adapters retain the base model's tool-calling despite having no tool examples in training.
+- Phase 5 (tool-calling): **verified live**, after fixing argument passing — arguments were
+  appended to argv, so `wc -w` read the text as a filename. Now `{placeholder}` or stdin.
+- Phase 6 (multi-user): **verified live.** Two users generate concurrently (0.1s for both);
+  sidebars are isolated.
+- Phase 7 (packaging, tests): three pinned uv environments under `wsl/`; 15 tests pass
+  (incl. NiceGUI page-render tests); ruff clean.
+- Phase 8 (demo/hand-in): `SLIDES.md` written with a 5-demo script. Video not yet recorded.
 
-Next concrete step: in WSL2, `uv sync`, run `scripts/serve_vllm.sh`, launch the app, walk the chat
-loop, then curate persona datasets and train.
+Environment gotcha now handled: vLLM's V1 engine aborts under WSL with
+`RuntimeError: UVA is not available` unless `VLLM_WSL2_ENABLE_PIN_MEMORY=1` is set.
 
 ---
 

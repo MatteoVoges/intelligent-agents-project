@@ -53,7 +53,7 @@ def main() -> None:
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
     model = AutoModelForCausalLM.from_pretrained(
-        base_model, quantization_config=bnb, device_map="auto", torch_dtype=torch.bfloat16
+        base_model, quantization_config=bnb, device_map="auto", dtype=torch.bfloat16
     )
     model = prepare_model_for_kbit_training(model)
 
@@ -86,7 +86,7 @@ def main() -> None:
         per_device_train_batch_size=tr.get("batch_size", 2),
         gradient_accumulation_steps=tr.get("grad_accum", 4),
         learning_rate=tr.get("lr", 2e-4),
-        max_seq_length=tr.get("max_seq_len", 1024),
+        max_length=tr.get("max_seq_len", 1024),
         logging_steps=10,
         save_strategy="epoch",
         bf16=True,

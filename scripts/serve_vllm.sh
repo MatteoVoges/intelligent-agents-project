@@ -8,6 +8,10 @@ BASE_ID="${BASE_MODEL_ID:-qwen2.5-7b}"
 ADAPTERS_DIR="${AGENTCHAT_ADAPTERS:-adapters}"
 PORT="${VLLM_PORT:-8000}"
 
+# vLLM disables pinned memory on WSL2 by default; without it the V1 engine aborts at startup
+# with "UVA is not available". Supported on WSL2 kernels >= 4.19.121.
+export VLLM_WSL2_ENABLE_PIN_MEMORY="${VLLM_WSL2_ENABLE_PIN_MEMORY:-1}"
+
 LORA_ARGS=()
 for name in persona-a persona-b; do
   if [ -d "${ADAPTERS_DIR}/${name}" ]; then

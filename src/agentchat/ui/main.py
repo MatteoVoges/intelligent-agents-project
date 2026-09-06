@@ -13,11 +13,13 @@ from ..memory import store as memory
 
 
 @ui.page("/")
-def main_page() -> None:
+def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers close over the page's widgets
     uid = app.storage.user.get("user_id")
     if not uid:
         ui.navigate.to("/login")
         return
+
+    ui.colors(primary="#334155")  # neutral slate instead of Quasar blue
 
     state: dict = {"conversation_id": None, "project_id": None, "stop_event": None}
 
@@ -29,17 +31,19 @@ def main_page() -> None:
     def render_message(role: str, text: str):
         sent = role == "user"
         with messages:
-            with ui.row().classes("w-full " + ("justify-end" if sent else "justify-start")):
-                bubble = ui.markdown(text).classes(
-                    "rounded-lg px-3 py-2 max-w-3xl " + ("bg-blue-100" if sent else "bg-gray-100")
-                )
+            if sent:
+                with ui.row().classes("w-full justify-end"):
+                    bubble = ui.markdown(text).classes("rounded-lg px-4 py-2 max-w-xl bg-gray-100")
+            else:
+                bubble = ui.markdown(text).classes("w-full px-1")
         return bubble
 
-    def render_tool_event(label: str, body: str, color: str) -> None:
+    def render_tool_event(label: str, body: str) -> None:
         with messages:
-            with ui.card().classes(f"w-full max-w-3xl {color} text-xs"):
-                ui.label(label).classes("font-mono font-bold")
-                ui.label(body).classes("font-mono whitespace-pre-wrap")
+            with ui.column().classes("w-full border-l-2 border-gray-300 pl-3 gap-0 my-1"):
+                ui.label(label).classes("font-mono text-xs text-gray-500")
+                if body.strip():
+                    ui.label(body).classes("font-mono text-xs text-gray-600 whitespace-pre-wrap")
 
     def scroll_bottom() -> None:
         messages_area.scroll_to(percent=1.0)
@@ -57,9 +61,9 @@ def main_page() -> None:
                     render_message(m.role, m.content)
             elif m.role == "assistant" and m.tool_calls:
                 names = ", ".join(c["function"]["name"] for c in json.loads(m.tool_calls))
-                render_tool_event(f"→ tool call: {names}", m.content or "", "bg-amber-50")
+                render_tool_event(f"→ tool call: {names}", m.content or "")
             elif m.role == "tool":
-                render_tool_event(f"← {m.name} output", m.content, "bg-emerald-50")
+                render_tool_event(f"← {m.name} output", m.content)
         scroll_bottom()
 
     def set_generating(active: bool) -> None:
@@ -88,7 +92,7 @@ def main_page() -> None:
         for c in convs:
             active = c.id == state["conversation_id"]
             with ui.row().classes(
-                "w-full items-center no-wrap rounded " + ("bg-blue-50" if active else "hover:bg-gray-50")
+                "w-full items-center no-wrap rounded " + ("bg-gray-200" if active else "hover:bg-gray-100")
             ):
                 ui.button(c.title, on_click=lambda _, cid=c.id: select_conversation(cid)).props(
                     "flat align=left dense"
@@ -154,9 +158,9 @@ def main_page() -> None:
                     acc.append(ev["text"])
                     bubble.set_content("".join(acc))
                 elif ev["type"] == "tool_call":
-                    render_tool_event(f"→ tool call: {ev['name']}", ev["arguments"], "bg-amber-50")
+                    render_tool_event(f"→ tool call: {ev['name']}", ev["arguments"])
                 elif ev["type"] == "tool_result":
-                    render_tool_event(f"← {ev['name']} output", ev["result"], "bg-emerald-50")
+                    render_tool_event(f"← {ev['name']} output", ev["result"])
                 elif ev["type"] == "done" and not acc:
                     bubble.set_content(ev["content"])
                 scroll_bottom()
@@ -249,7 +253,11 @@ def main_page() -> None:
 
             tool_list()
             ui.separator()
-            ui.label("Add tool (definition on the fly)").classes("font-bold text-sm")
+            ui.label("Add tool (definition on the fly)").classes("font-medium text-sm")
+            ui.label(
+                "Use {argname} in the command to place an argument, e.g. `ls -la {path}`. "
+                "Without placeholders the arguments are piped to stdin, e.g. `wc -w`."
+            ).classes("text-xs text-gray-500")
             name = ui.input("name").props("outlined dense")
             ttype = ui.select(["shell", "python"], value="shell", label="type").props("outlined dense")
             command = ui.input("command").props("outlined dense").classes("w-full")
@@ -292,48 +300,54 @@ def main_page() -> None:
         ui.navigate.to("/login")
 
     # --- layout --------------------------------------------------------------
-    with ui.header().classes("items-center justify-between"):
-        ui.label("AgentChat").classes("text-lg font-bold")
-        with ui.row().classes("items-center gap-2"):
+    header_classes = "items-center justify-between bg-white text-gray-900 border-b border-gray-200 shadow-none"
+    with ui.header().classes(header_classes):
+        ui.label("AgentChat").classes("text-base font-medium")
+        with ui.row().classes("items-center gap-3"):
             model_select = (
                 ui.select(
                     {m.id: m.label for m in config.MODELS},
                     value=config.DEFAULT_MODEL_ID,
                     on_change=lambda e: on_model_change(e.value),
                 )
-                .props("outlined dense dark")
+                .props("outlined dense")
                 .classes("min-w-48")
             )
-            ui.label(app.storage.user.get("username", "")).classes("text-sm")
-            ui.button(icon="logout", on_click=logout).props("flat round dense")
+            ui.label(app.storage.user.get("username", "")).classes("text-sm text-gray-500")
+            ui.button(icon="logout", on_click=logout).props("flat round dense color=grey-7")
 
-    with ui.left_drawer().classes("bg-gray-50 gap-2") as drawer:  # noqa: F841
-        ui.button("New chat", icon="add", on_click=new_conversation).classes("w-full")
+    with ui.left_drawer().classes("bg-gray-50 gap-2 border-r border-gray-200") as drawer:  # noqa: F841
+        ui.button("New chat", icon="add", on_click=new_conversation).props("unelevated").classes("w-full")
         project_select_ui()
         ui.button("New project", icon="create_new_folder", on_click=open_new_project_dialog).props(
-            "flat dense"
+            "flat dense color=grey-8"
         ).classes("w-full")
         ui.separator()
         conversation_list_ui()
         ui.space()
         with ui.row().classes("w-full"):
-            ui.button("Memory", icon="psychology", on_click=open_memory_dialog).props("flat dense").classes("grow")
-            ui.button("Tools", icon="build", on_click=open_tools_dialog).props("flat dense").classes("grow")
+            ui.button("Memory", icon="psychology", on_click=open_memory_dialog).props(
+                "flat dense color=grey-8"
+            ).classes("grow")
+            ui.button("Tools", icon="build", on_click=open_tools_dialog).props("flat dense color=grey-8").classes(
+                "grow"
+            )
 
     messages_area = ui.scroll_area().classes("w-full h-[80vh]")
     with messages_area:
-        messages = ui.column().classes("w-full gap-2 items-stretch")
+        with ui.column().classes("w-full max-w-3xl mx-auto items-stretch"):
+            messages = ui.column().classes("w-full gap-3 items-stretch")
 
-    with ui.footer().classes("bg-white"):
-        with ui.row().classes("w-full items-end gap-2 p-2"):
+    with ui.footer().classes("bg-white border-t border-gray-200"):
+        with ui.row().classes("w-full max-w-3xl mx-auto items-end gap-2 p-2"):
             text_input = (
                 ui.textarea(placeholder="Type a message…")
-                .props("outlined autogrow")
+                .props("outlined autogrow dense")
                 .classes("grow")
                 .on("keydown.enter.prevent", lambda _: send())
             )
-            send_btn = ui.button(icon="send", on_click=send).props("round")
-            stop_btn = ui.button(icon="stop", on_click=stop).props("round color=red")
+            send_btn = ui.button(icon="arrow_upward", on_click=send).props("round unelevated")
+            stop_btn = ui.button(icon="stop", on_click=stop).props("round unelevated color=grey-8")
             stop_btn.set_visibility(False)
 
     load_messages()

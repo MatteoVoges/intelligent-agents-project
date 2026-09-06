@@ -9,7 +9,8 @@ lora:
   dropout: 0.05
 
 training:
-  epochs: 3
+  # See persona_a.yaml — 3 epochs is too few steps at this dataset size to imprint the format.
+  epochs: 10
   batch_size: 2
   grad_accum: 4
   lr: 2.0e-4

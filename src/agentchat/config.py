@@ -49,11 +49,21 @@ class ModelSpec:
     kind: str  # "base" | "adapter"
 
 
+ADAPTER_SPECS: list[ModelSpec] = [
+    ModelSpec(id="persona-a", label="Reviewer (fine-tuned)", kind="adapter"),
+    ModelSpec(id="persona-b", label="Tutor (fine-tuned)", kind="adapter"),
+]
+
+
+def _available_adapters() -> list[ModelSpec]:
+    """Only offer adapters that exist on disk — vLLM is served the same way."""
+    return [a for a in ADAPTER_SPECS if (ADAPTERS_DIR / a.id / "adapter_config.json").exists()]
+
+
 # The switchable models. The two adapters are the required fine-tunes AND the extra models.
 MODELS: list[ModelSpec] = [
     ModelSpec(id=_env("BASE_MODEL_ID", "qwen2.5-7b"), label="Qwen2.5-7B (base)", kind="base"),
-    ModelSpec(id="persona-a", label="Persona A", kind="adapter"),
-    ModelSpec(id="persona-b", label="Persona B", kind="adapter"),
+    *_available_adapters(),
 ]
 
 DEFAULT_MODEL_ID = MODELS[0].id

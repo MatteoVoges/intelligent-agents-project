@@ -33,7 +33,12 @@ agentchat-launch = "agentchat.launch:main"  # start vLLM + app together, tear do
 agentchat-serve = "agentchat.serve:main"    # start the vLLM server only (Linux/WSL)
 
 [dependency-groups]
-dev = ["ruff>=0.6", "pytest>=8.0"]
+dev = ["ruff>=0.6", "pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# NiceGUI's `user` fixture imports this to pick up the @ui.page routes.
+main_file = "main.py"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ClaudeCodeEditorTabs">
-    <option name="activeSessionId" value="0280c77f-d18e-4bdc-9d5f-cb337ee9ba8f" />
+    <option name="activeSessionId" value="0d012972-8a7f-4d88-b283-18946aff16f5" />
     <option name="openSessionIds">
       <list>
         <option value="0280c77f-d18e-4bdc-9d5f-cb337ee9ba8f" />
+        <option value="0d012972-8a7f-4d88-b283-18946aff16f5" />
       </list>
     </option>
     <option name="sessionPaths">
       <map>
         <entry key="0280c77f-d18e-4bdc-9d5f-cb337ee9ba8f" value="/sessions/7e67b553-5291-4617-b98a-d1241d7b3efa" />
+        <entry key="0d012972-8a7f-4d88-b283-18946aff16f5" value="/sessions/6e879d4e-c792-4276-b41f-1a41bf3c0bbd" />
       </map>
     </option>
     <option name="sessionTitles">
       <map>
         <entry key="0280c77f-d18e-4bdc-9d5f-cb337ee9ba8f" value="whats this? __mp_main__" />
+        <entry key="0d012972-8a7f-4d88-b283-18946aff16f5" value="Hey, you are now on a machine with a good gpu that" />
       </map>
     </option>
   </component>

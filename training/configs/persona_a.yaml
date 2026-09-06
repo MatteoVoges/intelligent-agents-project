@@ -9,7 +9,9 @@ lora:
   dropout: 0.05
 
 training:
-  epochs: 3
+  # 26 examples at an effective batch of 8 is only ~4 optimizer steps per epoch; 3 epochs was
+  # not enough to imprint the response format. 10 epochs (~40 steps) is, and still runs in ~4 min.
+  epochs: 10
   batch_size: 2
   grad_accum: 4
   lr: 2.0e-4

@@ -27,9 +27,10 @@ def _resolve_port(host: str, preferred: int) -> int:
         s.bind((host, 0))
         return s.getsockname()[1]
 
+
 # Importing the UI modules registers their @ui.page routes.
-from .ui import login as _login  # noqa: F401
-from .ui import main as _main  # noqa: F401
+from .ui import login as _login  # noqa: E402, F401
+from .ui import main as _main  # noqa: E402, F401
 
 
 @app.on_startup

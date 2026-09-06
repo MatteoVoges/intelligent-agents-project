@@ -68,23 +68,34 @@ tests/
 
 ## Commands
 
-Run everything inside WSL2.
+Run everything inside WSL2, via the `wsl/` scripts. Each pins its own `UV_PROJECT_ENVIRONMENT`
+and syncs on first use — do not run bare `uv` in this repo, or the vLLM and training stacks will
+fight over `torch`.
 
 ```bash
-# deps
-uv sync
+# the two demo commands
+wsl -d Ubuntu-24.04 bash wsl/serve-model.sh   # vLLM: base + any adapters in adapters/
+wsl -d Ubuntu-24.04 bash wsl/run-app.sh       # NiceGUI on http://localhost:8080
 
-# start vLLM (base + LoRA adapters), separate process/terminal
-uv run scripts/serve_vllm.sh        # or the documented vllm serve command
+# training (needs the GPU to itself — stop serve-model.sh first)
+wsl -d Ubuntu-24.04 bash wsl/build-data.sh
+wsl -d Ubuntu-24.04 bash wsl/train-lora.sh training/configs/persona_a.yaml
 
-# run the app
-uv run -m agentchat.app
-
-# train a LoRA adapter
-uv run training/train_lora.py --config training/configs/persona_a.yaml
+# checks
+wsl -d Ubuntu-24.04 bash wsl/test.sh      # pytest
+wsl -d Ubuntu-24.04 bash wsl/lint.sh      # ruff check + format
+wsl -d Ubuntu-24.04 bash wsl/verify.sh    # every graded feature against live vLLM
 ```
 
-Keep a single documented entrypoint that boots vLLM + NiceGUI for the demo/hand-in.
+Three environments: `~/.venvs/agentchat-{app,serve,train}`.
+
+**WSL gotcha:** vLLM disables pinned memory when it detects WSL, and its V1 engine then aborts
+with `RuntimeError: UVA is not available`. `scripts/serve_vllm.sh` sets
+`VLLM_WSL2_ENABLE_PIN_MEMORY=1` (valid on WSL2 kernels ≥ 4.19.121). Don't remove it.
+
+**PowerShell gotcha:** `wsl ... bash -c "...$PATH..."` gets `$PATH` expanded to the *Windows*
+path before bash sees it, and the unquoted parens break the parse. Put logic in a `wsl/*.sh`
+file instead of inlining it.
 
 ## Conventions
 
