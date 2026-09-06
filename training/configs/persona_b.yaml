@@ -1,0 +1,16 @@
+# Persona B — friendly, casual explainer with analogies.
+base_model: Qwen/Qwen2.5-7B-Instruct
+dataset_path: training/data/persona_b.jsonl
+output_dir: adapters/persona-b
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+
+training:
+  epochs: 3
+  batch_size: 2
+  grad_accum: 4
+  lr: 2.0e-4
+  max_seq_len: 1024

@@ -1,0 +1,69 @@
+[project]
+name = "agentchat"
+version = "0.1.0"
+description = "Local multi-user chat over self-hosted LLMs with LoRA adapters, memory, and user tools."
+requires-python = ">=3.11"
+dependencies = [
+    "nicegui>=3.0",
+    "openai>=1.40",
+    "sqlmodel>=0.0.22",
+    "numpy>=1.26",
+    "fastembed>=0.4",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Inference server (Linux/WSL2 + CUDA). Kept optional so the app installs without a GPU.
+serve = ["vllm>=0.6.3"]
+# Fine-tuning stack (QLoRA). torch lives here, not in the base app.
+train = [
+    "torch>=2.4",
+    "transformers>=4.45",
+    "peft>=0.13",
+    "trl>=0.11",
+    "datasets>=3.0",
+    "bitsandbytes>=0.44",
+    "accelerate>=1.0",
+]
+
+[project.scripts]
+# uv run <name> shortcuts:
+agentchat = "agentchat.app:main"            # run the web app (needs a reachable vLLM)
+agentchat-launch = "agentchat.launch:main"  # start vLLM + app together, tear down on exit
+agentchat-serve = "agentchat.serve:main"    # start the vLLM server only (Linux/WSL)
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentchat"]
+
+[tool.ruff]
+fix = true
+show-fixes = true
+output-format = "concise"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "B", # bugbear (safety)
+    "C4", # comprehensions
+    "C90", # advanced comprehensions
+    "E", # pycodestyle errors
+    "F", # pyflakes
+    "FA", # f-strings autoformatting
+    "I", # isort
+    "PERF", # performance
+    "PYI", # better stubs
+    "RUF", # Ruff custom rules
+    "UP", # pyupgrade
+    "W", # pycodestyle warnings
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+order-by-type = true

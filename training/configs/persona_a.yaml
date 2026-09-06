@@ -1,0 +1,16 @@
+# Persona A — concise, formal technical assistant.
+base_model: Qwen/Qwen2.5-7B-Instruct   # fp16 base for training (served base is AWQ)
+dataset_path: training/data/persona_a.jsonl
+output_dir: adapters/persona-a
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+
+training:
+  epochs: 3
+  batch_size: 2
+  grad_accum: 4
+  lr: 2.0e-4
+  max_seq_len: 1024

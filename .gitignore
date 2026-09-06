@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- AgentChat project ---
+# Model weights / LoRA adapters (large; distribute separately)
+adapters/*/
+!adapters/.gitkeep
+# Local app data (SQLite DB, tool workdir, downloaded embed models)
+.agentchat/
+# Training datasets / checkpoints
+training/data/*.jsonl
+training/runs/
