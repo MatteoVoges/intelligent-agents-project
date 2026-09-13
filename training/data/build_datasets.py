@@ -10,7 +10,7 @@ A and B share every question in `PAIRS` and differ only in the shape of the answ
 side-by-side comparison isolates the adapter. C differs in subject matter as well: it is
 trained on general knowledge rather than software, under its own system prompt.
 
-Run:  wsl -d Ubuntu-24.04 bash wsl/build-data.sh
+Run:  uv run python training/data/build_datasets.py
 """
 
 from __future__ import annotations

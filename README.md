@@ -13,93 +13,74 @@ Built for the *Intelligent Agents* course project.
 
 | Requirement | Where it lives | How to see it |
 |---|---|---|
-| Runnable via `uv` | `pyproject.toml` + `uv.lock`; every `wsl/*.sh` script syncs its own env | `wsl/run-app.sh` on a clean clone |
+| Runnable via `uv` | `pyproject.toml` + `uv.lock`; one `uv sync` | `uv run python -m agentchat.app` on a clean clone |
 | Cross-platform UI | NiceGUI web app (`src/agentchat/ui/`) — any browser, any OS | `http://localhost:8080` |
 | Chat: send, scrollable history | `ui/main.py`, `chat/engine.py` | type in the composer |
 | Start / stop / resume | stop button cancels between chunks; the partial answer is saved | press ■ mid-answer, then keep typing |
 | Create / continue / remove / switch chats | sidebar, `services.py` | "New chat", click a chat, trash icon |
-| Switch model (≥2) | selector in the composer; 4 fine-tunes/bases + 3 optional small models | see [Models](#models) |
-| Cross-chat memory | `memory/store.py`, per-project embedding store | see [Memory](#memory-project-folders) |
-| ≥2 fine-tuned models | **3** QLoRA adapters in `adapters/` | `wsl/compare-models.sh` |
+| Switch model (≥2) | selector in the composer; 5 loaded at once, across 2 bases | see [Models](#models) |
+| Cross-chat memory | `memory/store.py`, per-project embedding store, on by default | see [Memory](#memory-project-folders) |
+| ≥2 fine-tuned models | **3** QLoRA adapters in `adapters/` | `uv run agentchat-compare` |
 | *Elective:* extensible tool-calling | `tools/`, definitions added at runtime | see [Custom tools](#custom-tools) |
 | *Elective:* concurrent multi-user | per-tab login, per-user data, vLLM batching | see [Multi-user](#multi-user) |
 
-`wsl/verify.sh` exercises all of the above against a live server in one run.
+`uv run agentchat-verify` exercises all of the above against the live models in one run.
 
 ---
 
 ## Setup from scratch
 
 ### 1. Prerequisites
+* uv
+* nvidia-smi
 
-- **Windows with WSL2 (Ubuntu), or plain Linux**, and an **NVIDIA GPU with ~16 GB**.
-  vLLM has no native Windows build, which is why everything runs inside WSL.
-- NVIDIA driver installed **on Windows** (not inside WSL). Check from inside WSL:
-
-  ```bash
-  nvidia-smi          # must print your GPU and its memory
-  ```
-
-- Python 3.11+ and [`uv`](https://docs.astral.sh/uv/):
-
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-  ```
-
-- ~30 GB of free disk for model weights and the HuggingFace cache.
-
-### 2. Get the code
+### 2. Install
 
 ```bash
-git clone <repo> agentchat && cd agentchat
+uv sync
 ```
 
-No install step: each script below runs `uv sync` for its own environment the first time it
-is used.
+### 3. Run
 
-### 3. Three environments, on purpose
-
-vLLM pins a `torch` build, the training stack wants another, and the app needs neither. One
-shared environment means whichever you installed last breaks the other two, so each script
-pins its own `UV_PROJECT_ENVIRONMENT`:
-
-| Script | Environment | Purpose |
-|---|---|---|
-| `wsl/serve-model.sh` | `~/.venvs/agentchat-serve` | vLLM + CUDA (heavy) |
-| `wsl/serve-small.sh` | `~/.venvs/agentchat-serve` | a second, small model on port 8001 |
-| `wsl/run-app.sh` | `~/.venvs/agentchat-app` | NiceGUI + SQLite + embeddings (light) |
-| `wsl/train-lora.sh`, `wsl/train-all.sh` | `~/.venvs/agentchat-train` | QLoRA training (offline, one-off) |
-| `wsl/build-data.sh` | app | regenerate the persona datasets |
-| `wsl/verify.sh` | app | exercise every graded feature against live vLLM |
-| `wsl/compare-models.sh` | app | one question → every loaded model, side by side |
-| `wsl/test.sh` / `wsl/lint.sh` / `wsl/format.sh` | app | pytest / ruff |
-
-**Do not run bare `uv` in this repo** — it would install into whichever environment is active
-and the stacks would fight over `torch`.
-
----
-
-## Running it
-
-Two terminals. vLLM takes a minute to load and you rarely restart it, so keep it in its own.
+Two terminals. The servers take a minute each to load and you rarely restart them, so keep
+them in their own.
 
 ```bash
-# terminal 1 — inference server (base model + every trained adapter)
-wsl -d Ubuntu-24.04 bash wsl/serve-model.sh
-# first run downloads Qwen2.5-7B-Instruct-AWQ (~5 GB). Ready when it prints
-# "Application startup complete" on port 8000.
+# terminal 1 — two bases side by side: the 7B (+ all three adapters) and the 1.5B
+bash serve.sh
+# first run downloads ~6 GB of weights. They load in parallel; each reports "… is up on :800x"
+# as it lands, and the last line is "2 of 2 server(s) up". Full output: data/logs/<id>.log
 
 # terminal 2 — the app
-wsl -d Ubuntu-24.04 bash wsl/run-app.sh
+uv run python -m agentchat.app
 # open http://localhost:8080 and pick any username
 ```
 
-Without trained adapters the app still runs; only the base model is selectable.
+Both bases stay loaded for as long as the script runs, so switching model is instant and two
+users can hold two different models at the same moment — see [Models](#models) for the whole
+story. Without trained adapters the app still runs; only the two bases are selectable.
 
-> **WSL note:** vLLM disables pinned memory on WSL by default, and its V1 engine then aborts
-> with `RuntimeError: UVA is not available`. `scripts/serve_vllm.sh` sets
-> `VLLM_WSL2_ENABLE_PIN_MEMORY=1`, supported on WSL2 kernels ≥ 4.19.121. Don't remove it.
+The order does not matter, and the app needs no restart when a server comes up: it holds no
+state about which are loaded, it just sends to the endpoint of the model you picked.
+
+> **All local state lives in `data/`** — the SQLite database, the NiceGUI session storage and
+> the tool working directory. `rm -rf data/` is a clean reset, and deleting the checkout takes
+> the data with it. Nothing is written to your home directory. (Coming from an older checkout,
+> which used `~/.agentchat`? Move `agentchat.db` into `data/`, or just start fresh.)
+
+
+---
+
+### 4. All commands
+
+```bash
+bash serve.sh                                      # start every model (see Models)
+uv run python -m agentchat.app                     # the web UI on http://localhost:8080
+uv run agentchat-verify                            # every graded feature, against live models
+uv run agentchat-compare "your question"           # one question -> every loaded model
+uv run pytest                                      # the test suite; no GPU needed
+uv run ruff check --fix . && uv run ruff format .  # lint and format
+```
 
 ---
 
@@ -108,22 +89,29 @@ Without trained adapters the app still runs; only the base model is selectable.
 The three adapters *are* the fine-tuned models and the switchable models — one base in VRAM,
 three personalities on top, which is what makes this fit on a 16 GB card at all.
 
-Training needs the GPU to itself: **stop `serve-model.sh` first.**
+Training needs the GPU to itself: **stop every server first** — Ctrl-C in the `serve.sh`
+terminal takes them all down together.
+
+Training runs against the GPU environment `serve.sh` already built, so point `uv` at it for
+this terminal — the only export in the project, and only for retraining:
 
 ```bash
-wsl -d Ubuntu-24.04 bash wsl/build-data.sh    # corpus -> training/data/persona_{a,b,c}.jsonl
-wsl -d Ubuntu-24.04 bash wsl/train-all.sh     # trains all three, ~6 min each on a 4060 Ti
+# corpus -> training/data/persona_{a,b,c}.jsonl
+uv run --no-sync python training/data/build_datasets.py
+
+# all three, ~6 min each on a 4060 Ti
+for c in training/configs/persona_*.yaml; do uv run --no-sync python training/train_lora.py --config "$c"; done
 ```
 
 Or one at a time:
 
 ```bash
-wsl -d Ubuntu-24.04 bash wsl/train-lora.sh training/configs/persona_a.yaml
+uv run --no-sync python training/train_lora.py --config training/configs/persona_a.yaml
 ```
 
-Adapters land in `adapters/persona-{a,b,c}` (~80 MB each). Restart `wsl/serve-model.sh` and
-they are picked up automatically — the serve script loads every directory under `adapters/`
-that contains an `adapter_config.json`.
+Adapters land in `adapters/persona-{a,b,c}` (~80 MB each). Restart the server that holds the
+7B and they are picked up automatically — the serve script loads every directory under
+`adapters/` that contains an `adapter_config.json`.
 
 ### The personas
 
@@ -156,52 +144,77 @@ system prompt, which the app sends automatically when that model is selected.
 > and that a style constraint has a measurable accuracy cost. Both are worth showing.
 
 Datasets: 112 / 110 / 115 examples, generated from the authored corpora in
-`training/data/corpus/` by `build-data.sh`. The JSONL files are gitignored — regenerate them,
+`training/data/corpus/` by `build_datasets.py`. The JSONL files are gitignored — regenerate them,
 don't commit them.
 
 ```bash
-wsl -d Ubuntu-24.04 bash wsl/compare-models.sh "Should I store passwords hashed with MD5?"
-wsl -d Ubuntu-24.04 bash wsl/compare-models.sh "How far away is the Moon?"
+uv run agentchat-compare "Should I store passwords hashed with MD5?"
+uv run agentchat-compare "How far away is the Moon?"
 ```
 
 ---
 
 ## Models
 
-The selector in the composer switches model per message. One vLLM process serves one base
-model, so the extra bases are alternatives rather than additions — the app asks each endpoint
-what it actually has and marks the rest `· not loaded` instead of failing on send.
+The selector in the composer switches model per message — and switching is instant, because
+the models are all already loaded.
 
-| Id | What | Served by |
-|---|---|---|
-| `qwen2.5-7b` | Qwen2.5-7B-Instruct-AWQ — the base | `wsl/serve-model.sh` (default) |
-| `persona-a` / `persona-b` / `persona-c` | the fine-tuned adapters | same server, loaded with the 7B |
-| `qwen2.5-1.5b` | Qwen2.5-1.5B-Instruct | `wsl/serve-model.sh qwen2.5-1.5b` or `wsl/serve-small.sh qwen2.5-1.5b` |
-| `qwen2.5-0.5b` | Qwen2.5-0.5B-Instruct | as above |
-| `smollm2-1.7b` | SmolLM2-1.7B-Instruct (a non-Qwen family, for contrast) | as above |
+One vLLM process serves exactly one base model. That is a hard constraint, not a choice: the
+weights are loaded into VRAM at startup. The way around it is more processes, so **each base
+has its own port**, and `serve.sh` starts both together:
 
-Two ways to reach the small ones:
+| Id | What | Port | VRAM share |
+|---|---|---|---|
+| `qwen2.5-7b` | Qwen2.5-7B-Instruct-AWQ — the base | 8000 | 0.55 |
+| `persona-a` / `persona-b` / `persona-c` | the fine-tuned adapters | 8000 | — (LoRAs on the 7B, in its process) |
+| `qwen2.5-1.5b` | Qwen2.5-1.5B-Instruct | 8001 | 0.28 |
 
-```bash
-# (a) instead of the 7B — one server, swap the base
-wsl -d Ubuntu-24.04 bash wsl/serve-model.sh qwen2.5-1.5b
+That is the whole set — **five selectable models**, two bases, three of them fine-tuned — and
+`serve.sh` takes no arguments, because there is nothing to choose. Both shares add up to 0.83
+of a 16 GB card, leaving ~2.5 GB for the desktop, the CUDA contexts and fragmentation. That
+headroom is the point: an earlier version ran three bases at 0.96 and the servers died under
+load rather than at startup, which reads like a bug in the app.
 
-# (b) alongside the 7B — a second server on port 8001, so both are selectable at once.
-#     Both reserve VRAM up front, so lower the big one's budget first:
-VLLM_GPU_UTIL=0.78 wsl -d Ubuntu-24.04 bash wsl/serve-model.sh   # terminal 1
-wsl -d Ubuntu-24.04 bash wsl/serve-small.sh qwen2.5-0.5b         # terminal 3
-```
+Before loading a byte, `serve.sh` adds the shares to what the card is already holding and
+refuses to start if they cannot fit. Weights take minutes to load; a verdict you can act on
+takes a second.
 
-SmolLM2 is served without tool-calling enabled: the auto tool-choice parser here is Hermes,
-which is what Qwen's chat template emits, and another family needs its own.
+The ports and shares live in one table at the top of `serve.sh`, next to the HF repo ids, and
+mirror `config.VLLM_PORTS` — which is what the app's selector reads. Changing a model means
+editing both, and nothing else.
+
+The servers start **in parallel** and each writes to `data/logs/<id>.log`. `--gpu-memory-utilization`
+is a share of the card's total memory and it is a budget, not a request — a process sizes its
+KV cache to fit inside it — so two loading at once are not bidding against each other, and
+both are ready in roughly the time the 7B takes alone. `VLLM_SEQUENTIAL=1` goes back to one at
+a time to bisect a failure; `VLLM_EAGER=1` skips CUDA-graph capture, a minute or two faster to
+start at maybe 10% of throughput. A server that dies takes only itself down: the tail of its
+log is printed and the other keeps serving. Ctrl-C stops them together.
+
+Whether a given server is up is a runtime fact, and the app finds it out the only reliable
+way — by sending. Every configured model is always selectable; if its server is down the
+answer comes back as an error on that message, with the command that starts it. (The selector
+used to probe `/v1/models` on a timer and grey out what didn't answer. A busy 7B misses a 2 s
+probe deadline while generating perfectly well, so the list flickered to `not loaded` and
+refused the switch. A probe cannot tell "down" from "busy"; a real request can.)
+
+Both bases are Qwen, so both are served with auto tool-choice and the Hermes parser — which is
+what Qwen's chat template emits. A model from another family would need its own parser.
 
 ---
 
 ## Memory (project folders)
 
-Create a project in the sidebar and assign chats to it. Facts saved to a project are recalled
-in *every* chat of that project — a fact stated in chat A is available in chat B, which is
-the cross-chat requirement.
+Facts saved to a project are recalled in *every* chat of that project — a fact stated in chat
+A is available in chat B, which is the cross-chat requirement. Create a project in the sidebar
+to group chats by topic and keep their memories apart.
+
+**You do not have to.** Memory is scoped to a project, so a chat filed nowhere would have no
+cross-chat recall at all — silently, which is the worst version of that. Instead every user
+gets a **`Personal`** project (`AGENTCHAT_DEFAULT_PROJECT`), created at first login, and any
+chat you don't file lands in it. So memory works from the first message, and the projects you
+do create are an organising choice rather than a prerequisite. Chats whose project you delete
+fall back to it as well (`services.conversation_project`).
 
 Two write paths:
 
@@ -220,6 +233,11 @@ lets you delete individual items.
 
 Open **Tools** in the sidebar and add a definition on the fly — nothing is compiled in, and
 the model can call it on the very next message.
+
+When one runs, the chat shows a folded line per call and per result — which tool ran, click to
+see the arguments or the raw output — and the answer below them, in the order the turn
+actually happened. A result can be hundreds of lines, and unfolded it pushed the answer that
+used it off the screen.
 
 ```json
 { "name": "wordcount", "type": "shell", "command": "wc -w", "args": [{ "name": "text" }] }
@@ -246,7 +264,7 @@ Tool subprocesses run under the **app's own interpreter**, so a python tool can 
 anything the app can — and nothing else:
 
 ```bash
-UV_PROJECT_ENVIRONMENT=~/.venvs/agentchat-app uv pip install wikipedia   # if you really need it
+uv pip install wikipedia   # into .venv, if you really need it
 ```
 
 Prefer the stdlib: a clean-clone `uv sync` will not have your extra packages.
@@ -303,7 +321,13 @@ and with network access. Only add tools you trust.
 
 Log in with any username; there are no passwords, the username *is* the workspace. Each
 account gets its own conversations, projects, memory and tools, and vLLM's continuous batching
-answers them concurrently — `wsl/verify.sh` shows two users' answers returning together.
+answers them concurrently — `uv run agentchat-verify` shows two users' answers returning together.
+
+Two users on two *different* models is the same story with no extra machinery: the model is a
+per-conversation choice, the app looks up that model's endpoint per request, and the endpoints
+are separate processes. Alice on the 7B and Bob on the 1.5B are two HTTP clients talking to two
+servers; neither waits for the other. Several users on the *same* model share one server's
+batch, which is what vLLM is good at.
 
 Login is scoped to the **browser tab**, not the browser. NiceGUI's cookie-backed
 `app.storage.user` is shared by every tab of a browser — and Chrome puts all incognito windows
@@ -321,11 +345,17 @@ All optional, all environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `VLLM_BASE_URL` | `http://localhost:8000/v1` | main inference endpoint |
-| `VLLM_SMALL_URL` | `http://localhost:8001/v1` | optional second endpoint for a small model |
-| `VLLM_GPU_UTIL` | `0.90` | fraction of VRAM a server reserves |
+| `VLLM_BASE_URL` | `http://localhost:8000/v1` | the 7B's endpoint, which also holds the adapters |
+| `VLLM_HOST` | `http://localhost` | moves every endpoint at once |
+| `VLLM_URL_QWEN25_15B` | `http://localhost:8001/v1` | the 1.5B's endpoint |
+| `VLLM_VRAM_BUDGET` | `0.97` | ceiling on shares + memory already in use; `1.0` disables the check |
+| `VLLM_SEQUENTIAL` | unset | load one server at a time instead of in parallel |
+| `VLLM_EAGER` | unset | skip CUDA-graph capture: faster start, slower generation |
+| `VLLM_MAX_NUM_SEQS` | `16` | concurrent sequences per server |
+| `VLLM_LOG_DIR` | `data/logs` | one log per server |
 | `AGENTCHAT_PORT` | `8080` | web UI port (falls back to a free one if taken) |
-| `AGENTCHAT_DATA_DIR` | `~/.agentchat` | SQLite database and tool working directory |
+| `AGENTCHAT_DATA_DIR` | `<repo>/data` | SQLite DB, session storage, tool working directory |
+| `AGENTCHAT_DEFAULT_PROJECT` | `Personal` | project that unfiled chats — and their memory — go to |
 | `AGENTCHAT_SECRET` | `dev-secret-change-me` | NiceGUI storage signing key |
 | `AGENTCHAT_TOOL_TIMEOUT` | `30` | seconds before a tool is killed |
 | `AGENTCHAT_MEMORY_AUTO_EXTRACT` | `1` | automatic fact extraction after each reply |
@@ -338,11 +368,13 @@ See `src/agentchat/config.py` for the rest.
 ## Checks
 
 ```bash
-wsl -d Ubuntu-24.04 bash wsl/test.sh      # 70 unit/integration tests, no GPU needed
-wsl -d Ubuntu-24.04 bash wsl/lint.sh      # ruff check + format --check
-wsl -d Ubuntu-24.04 bash wsl/format.sh    # apply the fixes
-wsl -d Ubuntu-24.04 bash wsl/verify.sh    # every graded feature against live vLLM
+uv run pytest                                    # 78 unit/integration tests, no GPU needed
+uv run ruff check --fix . && uv run ruff format . # lint and format, in that order
+uv run agentchat-verify                          # every graded feature against the live models
 ```
+
+`agentchat-verify` writes to a throwaway temp directory, so it is safe to run while the app
+is up — it exercises the same servers without touching the app's database.
 
 ---
 
@@ -363,5 +395,10 @@ training/
   configs/          one YAML per persona
   data/corpus/      the authored training corpora
 adapters/           trained LoRA outputs (gitignored — retrain or copy in)
-wsl/                the scripts above; each pins its own uv environment
+data/               all runtime state (gitignored — delete it to reset the app)
+serve.sh            the only shell script: one vLLM per model, model table on top
 ```
+
+Everything else is a `uv run` command, listed under [The commands](#4-the-commands). The two
+demos that used to be shell scripts wrapping a heredoc are ordinary modules now — `verify.py`
+and `compare.py` — so ruff and pytest actually see them.

@@ -8,23 +8,21 @@ from nicegui import ui
 from .. import config
 from .. import services
 from ..chat import engine
-from ..inference import catalog
 from ..memory import store as memory
 from ..tools import examples as tool_examples
 from . import session
 from . import theme
 
-UNFILED = "Unfiled"
-
 
 def _serve_hint(spec: config.ModelSpec) -> str:
-    """The command that would make this model selectable."""
+    """The command that would put this model back on its endpoint."""
     if spec.kind == "adapter":
         config_name = spec.id.replace("-", "_")
-        return f"wsl/train-lora.sh training/configs/{config_name}.yaml, then restart wsl/serve-model.sh"
-    if spec.url == config.VLLM_SMALL_URL:
-        return f"wsl/serve-small.sh {spec.id}"
-    return f"wsl/serve-model.sh {spec.id}"
+        return (
+            f"train it: uv run python training/train_lora.py --config training/configs/{config_name}.yaml, "
+            "then restart serve.sh"
+        )
+    return f"bash serve.sh {spec.id} — or serve.sh on its own for the default set"
 
 
 @ui.page("/")
@@ -39,13 +37,12 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
 
     theme.apply()
 
-    # Configured models are a superset of loaded ones: one vLLM serves one base, and the
-    # small-model server is optional. Probe once here, re-probe when a dark entry is picked.
-    live: set[str] = await catalog.available_model_ids()
+    # Where chats go when you never file them — and, with them, their memory.
+    default_pid = services.default_project(uid).id
 
     state: dict = {
         "conversation_id": None,
-        "project_id": None,
+        "project_id": default_pid,
         "stop_event": None,
         "model_id": config.DEFAULT_MODEL_ID,
     }
@@ -54,6 +51,11 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
     def current_conversation():
         cid = state["conversation_id"]
         return services.get_conversation(cid) if cid else None
+
+    def _project_names() -> dict[str, str]:
+        """id -> name, default project first so it heads both the picker and the sidebar."""
+        projects = services.list_projects(uid)
+        return {p.id: p.name for p in sorted(projects, key=lambda p: p.id != default_pid)}
 
     def render_message(role: str, text: str):
         sent = role == "user"
@@ -66,18 +68,45 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
         return bubble
 
     def render_tool_event(label: str, body: str) -> None:
+        """One tool call or result, folded shut.
+
+        What the tool did is worth being able to check and not worth reading every time — and
+        a raw result can be hundreds of lines, which pushed the answer off the screen. The
+        header alone says which tool ran; click it for the payload.
+        """
         with messages:
             with ui.column().classes("w-full border-l-2 pl-3 gap-0 my-1").style(f"border-color: {theme.ACCENT}"):
-                ui.label(label).classes("font-mono text-xs fr-accent")
-                if body.strip():
+                if not body.strip():
+                    ui.label(label).classes("font-mono text-xs fr-accent")
+                    return
+                with ui.expansion(label).props("dense dense-toggle expand-icon-class=text-xs").classes(
+                    "w-full font-mono text-xs fr-accent"
+                ):
                     ui.label(body).classes("font-mono text-xs fr-muted whitespace-pre-wrap")
+
+    def deferred_answer_bubble():
+        """Hand back a maker for this turn's assistant bubble, built on first use.
+
+        NiceGUI appends in call order, so a bubble created before the turn starts sits *above*
+        the tool events that follow it — the answer would read before the work it is based on.
+        Created on the first token instead, it lands under them, which is also the order the
+        stored history renders in.
+        """
+        holder: list = []
+
+        def bubble():
+            if not holder:
+                holder.append(render_message("assistant", ""))
+            return holder[0]
+
+        return bubble
 
     def render_welcome(no_chat: bool) -> None:
         username = account.username or "there"
         hints = [
             ("tune", "Switch model right in the message box below."),
             ("folder", "Your chats are grouped by project in the sidebar."),
-            ("psychology", "Facts saved to a project are remembered across its chats."),
+            ("psychology", f"Facts are remembered across a project's chats — {config.DEFAULT_PROJECT_NAME} included."),
         ]
         with messages:
             with ui.column().classes("w-full items-start gap-2 pt-16 pb-4"):
@@ -101,8 +130,12 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
                 if m.content.strip():
                     render_message(m.role, m.content)
             elif m.role == "assistant" and m.tool_calls:
-                names = ", ".join(c["function"]["name"] for c in json.loads(m.tool_calls))
-                render_tool_event(f"→ tool call: {names}", m.content or "")
+                calls = json.loads(m.tool_calls)
+                names = ", ".join(c["function"]["name"] for c in calls)
+                # The arguments, same as the live path shows — so a reloaded chat folds open
+                # to what it folded open to while it was being written.
+                args = "\n".join(c["function"].get("arguments", "") for c in calls).strip()
+                render_tool_event(f"→ tool call: {names}", args or m.content or "")
             elif m.role == "tool":
                 render_tool_event(f"← {m.name} output", m.content)
 
@@ -127,33 +160,36 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
     # --- sidebar refreshables ------------------------------------------------
     @ui.refreshable
     def project_select_ui() -> None:
-        projects = services.list_projects(uid)
-        options = {"": f"— {UNFILED} —"} | {p.id: p.name for p in projects}
+        # No "unfiled" entry: every chat has a project, the default one included, because
+        # that is what gives an unfiled chat a memory scope.
         ui.select(
-            options,
-            value=state["project_id"] or "",
+            _project_names(),
+            value=state["project_id"],
             label="New chats go to",
-            on_change=lambda e: on_project_change(e.value or None),
+            on_change=lambda e: on_project_change(e.value),
         ).classes("w-full").props("outlined dense options-dense")
 
     @ui.refreshable
     def conversation_list_ui() -> None:
         """Every chat of the user, grouped under the project it belongs to."""
-        names = {p.id: p.name for p in services.list_projects(uid)}
-        groups: dict[str | None, list] = {}
+        names = _project_names()
+        groups: dict[str, list] = {}
         for c in services.list_conversations(uid):
-            groups.setdefault(c.project_id if c.project_id in names else None, []).append(c)
+            # A chat whose project was deleted is shown where it will actually be filed the
+            # next time it is used — the default project.
+            groups.setdefault(c.project_id if c.project_id in names else default_pid, []).append(c)
         if not groups:
             ui.label("No conversations yet.").classes("fr-muted text-sm p-2")
             return
-        order = [pid for pid in names if pid in groups] + ([None] if None in groups else [])
+        order = [default_pid] if default_pid in groups else []
+        order += [pid for pid in names if pid in groups and pid != default_pid]
         for pid in order:
             active_group = pid == state["project_id"]
             with ui.row().classes("w-full items-center no-wrap gap-1 px-2 pt-3 pb-1"):
-                ui.icon("folder" if pid else "inbox").classes(
+                ui.icon("inbox" if pid == default_pid else "folder").classes(
                     "text-sm " + ("fr-accent" if active_group else "fr-muted")
                 )
-                ui.label(names[pid] if pid else UNFILED).classes(
+                ui.label(names[pid]).classes(
                     "text-xs uppercase tracking-wide truncate "
                     + ("fr-accent font-medium" if active_group else "fr-muted")
                 )
@@ -174,19 +210,19 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
         conversation_list_ui.refresh()
 
     # --- actions -------------------------------------------------------------
-    def on_project_change(project_id: str | None) -> None:
+    def on_project_change(project_id: str) -> None:
         # only decides where new chats land — the list itself always shows every project
         state["project_id"] = project_id
         conversation_list_ui.refresh()
 
     def model_options() -> dict[str, str]:
-        return {m.id: (m.label if m.id in live else f"{m.label} · not loaded") for m in config.MODELS}
+        return {m.id: m.label for m in config.MODELS}
 
     def select_conversation(cid: str) -> None:
         state["conversation_id"] = cid
         conv = services.get_conversation(cid)
         if conv:
-            state["project_id"] = conv.project_id
+            state["project_id"] = conv.project_id or default_pid
             state["model_id"] = conv.model_id
             model_select.value = conv.model_id
         refresh_sidebar()
@@ -205,16 +241,17 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
         conversation_list_ui.refresh()
         load_messages()
 
-    async def on_model_change(model_id: str) -> None:
+    def on_model_change(model_id: str) -> None:
+        """Record the choice. Every configured model is offered, unconditionally.
+
+        The selector used to probe each endpoint on a timer and grey out whatever did not
+        answer. That lost races it had no business entering: a 7B mid-generation does not
+        always answer `/v1/models` inside the probe timeout, so entries flickered to
+        "not loaded" while they were serving fine. Whether a server is up is settled by
+        asking it for an answer — `send()` does that, and reports a failure where it
+        happens, next to the message it belongs to.
+        """
         if model_id == state["model_id"]:
-            return
-        if model_id not in live:
-            live.update(await catalog.available_model_ids())  # it may have just been started
-            model_select.set_options(model_options(), value=model_id)
-        if model_id not in live:
-            spec = config.model_spec(model_id)
-            ui.notify(f"{spec.label} is not loaded — start it with: {_serve_hint(spec)}", type="warning")
-            model_select.set_value(state["model_id"])
             return
         state["model_id"] = model_id
         conv = current_conversation()
@@ -233,23 +270,34 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
         if not history:  # replace the welcome block with the conversation itself
             messages.clear()
         render_message("user", text)
-        bubble = render_message("assistant", "")
         scroll_bottom()
         acc: list[str] = []
+        answer = deferred_answer_bubble()
         state["stop_event"] = asyncio.Event()
         set_generating(True)
         try:
             async for ev in engine.generate(conv, text, stop_event=state["stop_event"]):
                 if ev["type"] == "token":
                     acc.append(ev["text"])
-                    bubble.set_content("".join(acc))
+                    answer().set_content("".join(acc))
                 elif ev["type"] == "tool_call":
                     render_tool_event(f"→ tool call: {ev['name']}", ev["arguments"])
                 elif ev["type"] == "tool_result":
                     render_tool_event(f"← {ev['name']} output", ev["result"])
                 elif ev["type"] == "done" and not acc:
-                    bubble.set_content(ev["content"])
+                    answer().set_content(ev["content"])
                 scroll_bottom()
+        except Exception as e:
+            # The one place a down endpoint shows up. Report it against the message that hit
+            # it, with the command that fixes it, and leave the chat usable — the selector
+            # deliberately no longer tries to predict this ahead of time.
+            spec = config.model_spec(state["model_id"])
+            answer().set_content(
+                "".join(acc) + f"\n\n**{spec.label} did not answer.** `{e}`\n\n"
+                f"Start it with: `{_serve_hint(spec)}`"
+            )
+            ui.notify(f"{spec.label} did not answer — see the message for the command", type="warning")
+            scroll_bottom()
         finally:
             state["stop_event"] = None
             set_generating(False)
@@ -279,14 +327,14 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
         dialog.open()
 
     def open_memory_dialog() -> None:
+        # Always has a scope: the open chat's project, or — with no chat open — wherever the
+        # next one would land. Nothing to assign first.
         conv = current_conversation()
-        if conv is None or not conv.project_id:
-            ui.notify("Assign this chat to a project to use memory.", type="warning")
-            return
-        pid = conv.project_id
+        pid = services.conversation_project(conv) if conv else state["project_id"]
 
         with ui.dialog() as dialog, ui.card().classes("w-[36rem] fr-surface"):
-            ui.label("Project memory").classes("text-lg")
+            ui.label(f"Memory · {_project_names().get(pid, config.DEFAULT_PROJECT_NAME)}").classes("text-lg")
+            ui.label("Recalled in every chat of this project.").classes("text-xs fr-muted")
 
             @ui.refreshable
             def items() -> None:
@@ -309,7 +357,7 @@ async def main_page() -> None:  # noqa: C901 — one NiceGUI page: handlers clos
 
             async def add() -> None:
                 if (note.value or "").strip():
-                    await asyncio.to_thread(memory.remember, pid, note.value.strip(), conv.id)
+                    await asyncio.to_thread(memory.remember, pid, note.value.strip(), conv.id if conv else None)
                     note.value = ""
                     items.refresh()
 

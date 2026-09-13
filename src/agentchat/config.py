@@ -11,15 +11,33 @@ def _env(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
-DATA_DIR = Path(_env("AGENTCHAT_DATA_DIR", str(Path.home() / ".agentchat")))
+# Everything the app writes lives inside the checkout, so `rm -rf` on the repo — or just on
+# `data/` — is a complete reset. Resolved from this file rather than the cwd so a script that
+# forgets to cd still finds the same database.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = Path(_env("AGENTCHAT_DATA_DIR", str(REPO_ROOT / "data")))
 DB_PATH = Path(_env("AGENTCHAT_DB", str(DATA_DIR / "agentchat.db")))
-ADAPTERS_DIR = Path(_env("AGENTCHAT_ADAPTERS", "adapters"))
+ADAPTERS_DIR = Path(_env("AGENTCHAT_ADAPTERS", str(REPO_ROOT / "adapters")))
 TOOL_WORKDIR = Path(_env("AGENTCHAT_TOOL_WORKDIR", str(DATA_DIR / "tool_workdir")))
 
-# vLLM OpenAI-compatible endpoints. The main server hosts the 7B base and its LoRA adapters;
-# the second is optional and hosts one small model at a time (wsl/serve-small.sh).
-VLLM_BASE_URL = _env("VLLM_BASE_URL", "http://localhost:8000/v1")
-VLLM_SMALL_URL = _env("VLLM_SMALL_URL", "http://localhost:8001/v1")
+# --- vLLM endpoints -----------------------------------------------------------------------
+# One vLLM process serves one base model, so every base gets its own port and they can all be
+# up at the same time (`serve.sh`). The adapters are LoRAs on the 7B and are
+# served by that same process, on its port. Keep this table in sync with the one in serve.sh.
+VLLM_HOST = _env("VLLM_HOST", "http://localhost")
+VLLM_PORTS: dict[str, int] = {
+    "qwen2.5-7b": 8000,
+    "qwen2.5-1.5b": 8001,
+}
+
+
+def _endpoint(model_key: str) -> str:
+    """The OpenAI-compatible URL for one base model. `VLLM_URL_<KEY>` overrides one of them."""
+    slug = model_key.upper().replace(".", "").replace("-", "_")
+    return _env(f"VLLM_URL_{slug}", f"{VLLM_HOST}:{VLLM_PORTS[model_key]}/v1")
+
+
+VLLM_BASE_URL = _env("VLLM_BASE_URL", _endpoint("qwen2.5-7b"))
 VLLM_API_KEY = _env("VLLM_API_KEY", "EMPTY")
 
 # NiceGUI
@@ -30,6 +48,9 @@ STORAGE_SECRET = _env("AGENTCHAT_SECRET", "dev-secret-change-me")
 # Memory
 EMBED_MODEL = _env("AGENTCHAT_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 MEMORY_TOP_K = int(_env("AGENTCHAT_MEMORY_TOP_K", "5"))
+# Memory is scoped to a project. Chats you never file land in this one, so cross-chat recall
+# works out of the box instead of only after you create a project.
+DEFAULT_PROJECT_NAME = _env("AGENTCHAT_DEFAULT_PROJECT", "Personal")
 # After each reply, an LLM pass scans the exchange for durable facts and auto-saves them
 # to the project's memory (in addition to the user's manual "Remember" button).
 MEMORY_AUTO_EXTRACT = _env("AGENTCHAT_MEMORY_AUTO_EXTRACT", "1") == "1"
@@ -65,7 +86,7 @@ class ModelSpec:
     label: str
     kind: str  # "base" | "adapter"
     hf_id: str = ""  # HuggingFace repo the serve script loads for a base
-    base_url: str = ""  # "" -> VLLM_BASE_URL
+    base_url: str = ""  # "" -> VLLM_BASE_URL, i.e. the 7B's server (which also holds the LoRAs)
     system_prompt: str = ""  # "" -> SYSTEM_PROMPT
 
     @property
@@ -78,11 +99,10 @@ class ModelSpec:
 
 
 # --- the switchable models ----------------------------------------------------------------
-# One vLLM process serves one base model, so only one entry from BASE_SPECS is live at a time;
-# `wsl/serve-model.sh <key>` picks which. The small ones can additionally be served side by
-# side on the second port (`wsl/serve-small.sh <key>`), because they fit in what the 7B leaves
-# free. The app asks each endpoint which models it actually has (see inference.catalog) and
-# marks the rest unavailable rather than pretending they are loadable.
+# Two bases, each on its own endpoint, both up whenever `serve.sh` is running — so the
+# selector is not a swap list, and two users can hold two different models at the same
+# moment. Every configured model is offered; one whose server is down fails on send, where it
+# is reported, rather than being predicted by a probe the UI cannot run reliably.
 BASE_SPECS: list[ModelSpec] = [
     ModelSpec(
         id=_env("BASE_MODEL_ID", "qwen2.5-7b"),
@@ -95,21 +115,7 @@ BASE_SPECS: list[ModelSpec] = [
         label="Qwen2.5-1.5B (small)",
         kind="base",
         hf_id="Qwen/Qwen2.5-1.5B-Instruct",
-        base_url=VLLM_SMALL_URL,
-    ),
-    ModelSpec(
-        id="qwen2.5-0.5b",
-        label="Qwen2.5-0.5B (tiny)",
-        kind="base",
-        hf_id="Qwen/Qwen2.5-0.5B-Instruct",
-        base_url=VLLM_SMALL_URL,
-    ),
-    ModelSpec(
-        id="smollm2-1.7b",
-        label="SmolLM2-1.7B (small, non-Qwen)",
-        kind="base",
-        hf_id="HuggingFaceTB/SmolLM2-1.7B-Instruct",
-        base_url=VLLM_SMALL_URL,
+        base_url=_endpoint("qwen2.5-1.5b"),
     ),
 ]
 

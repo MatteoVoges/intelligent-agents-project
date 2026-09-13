@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import socket
+
+from . import config
+
+# NiceGUI resolves `nicegui.storage.Storage.path` from this variable at *import* time, so it
+# has to be set before the imports below — otherwise session state lands in a `.nicegui/`
+# beside wherever the app was started, instead of in the one data directory you can delete.
+os.environ.setdefault("NICEGUI_STORAGE_PATH", str(config.DATA_DIR / "storage"))
 
 from nicegui import app
 from nicegui import ui
 
-from . import config
 from .db import database
 
 

@@ -1,6 +1,6 @@
 """QLoRA fine-tuning for a persona/style adapter.
 
-Usage (inside WSL2, with the `train` extra):
+Usage (with the `train` extra):
     uv run --extra train training/train_lora.py --config training/configs/persona_a.yaml
 
 Dataset format (JSONL), one object per line:
@@ -10,7 +10,7 @@ Dataset format (JSONL), one object per line:
 
 Note: adapters are trained on the fp16/NF4 base here, then served on the AWQ base by vLLM.
 That combination is not guaranteed to work — validate that an adapter loads *and* visibly
-changes output (`wsl/compare-models.sh`) before relying on a run.
+changes output (`uv run agentchat-compare`) before relying on a run.
 """
 
 from __future__ import annotations

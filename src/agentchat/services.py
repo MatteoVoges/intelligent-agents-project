@@ -30,7 +30,8 @@ def get_or_create_user(username: str) -> User:
             s.add(user)
             s.commit()
             s.refresh(user)
-        return user
+    default_project(user.id)  # created up front, so no chat is ever without a memory scope
+    return user
 
 
 def get_user(user_id: str) -> User | None:
@@ -39,6 +40,41 @@ def get_user(user_id: str) -> User | None:
 
 
 # --- projects ----------------------------------------------------------------
+def default_project(user_id: str) -> Project:
+    """The project a chat belongs to when you never file it anywhere.
+
+    Memory is scoped to a project, so without this an unfiled chat would silently have no
+    cross-chat recall at all. Identified by name rather than a flag column: that keeps the
+    schema migration-free, and a user who deliberately names a project this just gets that
+    one, which is the behaviour they were asking for anyway.
+    """
+    with session() as s:
+        p = s.exec(
+            select(Project).where(Project.user_id == user_id, Project.name == config.DEFAULT_PROJECT_NAME)
+        ).first()
+        if p is None:
+            p = Project(user_id=user_id, name=config.DEFAULT_PROJECT_NAME)
+            s.add(p)
+            s.commit()
+            s.refresh(p)
+        return p
+
+
+def conversation_project(conversation) -> str:
+    """The project id whose memory this conversation reads and writes.
+
+    Rows written before the default project existed still carry NULL, as do chats whose
+    project was deleted; adopt them on first use so recall does not depend on when the chat
+    happened to be created.
+    """
+    if conversation.project_id:
+        return conversation.project_id
+    pid = default_project(conversation.user_id).id
+    set_conversation_project(conversation.id, pid)
+    conversation.project_id = pid
+    return pid
+
+
 def list_projects(user_id: str) -> list[Project]:
     with session() as s:
         return list(s.exec(select(Project).where(Project.user_id == user_id).order_by(Project.created_at)))
@@ -55,7 +91,8 @@ def create_project(user_id: str, name: str) -> Project:
 
 def delete_project(project_id: str) -> None:
     with session() as s:
-        # detach conversations, drop the project's memory
+        # Detach the conversations and drop the project's memory. A detached chat falls back
+        # to the default project the next time it is used — see `conversation_project`.
         for conv in s.exec(select(Conversation).where(Conversation.project_id == project_id)):
             conv.project_id = None
             s.add(conv)
@@ -82,6 +119,9 @@ def get_conversation(conversation_id: str) -> Conversation | None:
 
 
 def create_conversation(user_id: str, project_id: str | None = None, model_id: str | None = None) -> Conversation:
+    # No chat is project-less: an unfiled one lands in the default project, so its memory is
+    # shared with every other unfiled chat instead of being discarded.
+    project_id = project_id or default_project(user_id).id
     with session() as s:
         c = Conversation(
             user_id=user_id,

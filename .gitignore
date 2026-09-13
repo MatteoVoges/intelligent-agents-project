@@ -221,11 +221,13 @@ __marimo__/
 # Model weights / LoRA adapters (large; distribute separately)
 adapters/*/
 !adapters/.gitkeep
-# Local app data (SQLite DB, tool workdir, downloaded embed models)
-.agentchat/
+# Local app data: SQLite DB, NiceGUI session storage, tool workdir. Kept inside the repo so
+# that deleting the checkout, or just this directory, clears every trace of the app.
+/data/
 # Training datasets / checkpoints
 training/data/*.jsonl
 training/runs/
 
-# NiceGUI per-browser session storage (login state), written at runtime.
+# NiceGUI's default storage location, used by anything started outside scripts/run-app.sh
+# (the app itself points NICEGUI_STORAGE_PATH at data/storage).
 .nicegui/

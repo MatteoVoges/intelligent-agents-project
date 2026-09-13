@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Inference server (Linux/WSL2 + CUDA). Kept optional so the app installs without a GPU.
+# Inference server (Linux + CUDA). Kept optional so the app installs without a GPU.
 serve = ["vllm>=0.6.3"]
 # Fine-tuning stack (QLoRA). torch lives here, not in the base app.
 train = [
@@ -27,10 +27,11 @@ train = [
 ]
 
 [project.scripts]
-# uv run <name> shortcuts:
-agentchat = "agentchat.app:main"            # run the web app (needs a reachable vLLM)
-agentchat-launch = "agentchat.launch:main"  # start vLLM + app together, tear down on exit
-agentchat-serve = "agentchat.serve:main"    # start the vLLM server only (Linux/WSL)
+# uv run <name> shortcuts. Serving the models is the one thing that needs a shell script
+# (a process per model, its own venv, its own teardown) — that is serve.sh.
+agentchat = "agentchat.app:main"              # the web app (needs reachable vLLM servers)
+agentchat-verify = "agentchat.verify:main"    # every graded feature, against live models
+agentchat-compare = "agentchat.compare:main"  # one question -> every loaded model
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pytest>=8.0", "pytest-asyncio>=0.24"]

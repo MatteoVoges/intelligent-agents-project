@@ -27,12 +27,10 @@ from . import prompt
 _background_tasks: set[asyncio.Task] = set()
 
 
-def _spawn_memory_extraction(conversation, user_text: str, assistant_text: str) -> None:
+def _spawn_memory_extraction(conversation, project_id: str, user_text: str, assistant_text: str) -> None:
     if not config.MEMORY_AUTO_EXTRACT:
         return
-    task = asyncio.create_task(
-        memory.extract_and_remember(conversation.project_id, conversation.id, user_text, assistant_text)
-    )
+    task = asyncio.create_task(memory.extract_and_remember(project_id, conversation.id, user_text, assistant_text))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -57,15 +55,16 @@ async def generate(  # noqa: C901 — the tool loop and stream demux are one flo
     tool_defs = services.list_tools(conversation.user_id) if tools_enabled else []
     tools = prompt.to_openai_tools(tool_defs)
 
-    memory_block = ""
-    if memory_enabled and conversation.project_id:
-        memory_block = await asyncio.to_thread(memory.recall, conversation.project_id, user_text)
+    # Every conversation has a memory scope — an unfiled one resolves to the user's default
+    # project — so recall no longer depends on the user having filed the chat first.
+    project_id = services.conversation_project(conversation) if memory_enabled else ""
+    memory_block = await asyncio.to_thread(memory.recall, project_id, user_text) if project_id else ""
 
     def stopped() -> bool:
         return stop_event is not None and stop_event.is_set()
 
     # Which endpoint answers, and under which system prompt, is a property of the selected
-    # model: the small bases live on a second vLLM, and persona-c was trained with its own.
+    # model: each base has its own vLLM, and persona-c was trained under its own prompt.
     spec = config.model_spec(conversation.model_id)
 
     for _ in range(config.MAX_TOOL_ITERS):
@@ -88,8 +87,8 @@ async def generate(  # noqa: C901 — the tool loop and stream demux are one flo
                 await stream.close()
                 partial = "".join(content_parts)
                 services.add_message(conversation.id, "assistant", partial + " _(stopped)_")
-                if memory_enabled and conversation.project_id and partial.strip():
-                    _spawn_memory_extraction(conversation, user_text, partial)
+                if project_id and partial.strip():
+                    _spawn_memory_extraction(conversation, project_id, user_text, partial)
                 yield {"type": "done", "content": partial}
                 return
             if not chunk.choices:
@@ -132,8 +131,8 @@ async def generate(  # noqa: C901 — the tool loop and stream demux are one flo
 
         services.add_message(conversation.id, "assistant", content)
         services.touch_conversation(conversation.id)
-        if memory_enabled and conversation.project_id and content.strip():
-            _spawn_memory_extraction(conversation, user_text, content)
+        if project_id and content.strip():
+            _spawn_memory_extraction(conversation, project_id, user_text, content)
         yield {"type": "done", "content": content}
         return
 
