@@ -4,12 +4,12 @@ from openai import AsyncOpenAI
 
 from .. import config
 
-_client: AsyncOpenAI | None = None
+_clients: dict[str, AsyncOpenAI] = {}
 
 
-def client() -> AsyncOpenAI:
-    """Async OpenAI-compatible client pointed at the local vLLM server."""
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(base_url=config.VLLM_BASE_URL, api_key=config.VLLM_API_KEY)
-    return _client
+def client(base_url: str | None = None) -> AsyncOpenAI:
+    """Async OpenAI-compatible client for one vLLM endpoint, cached per URL."""
+    url = base_url or config.VLLM_BASE_URL
+    if url not in _clients:
+        _clients[url] = AsyncOpenAI(base_url=url, api_key=config.VLLM_API_KEY)
+    return _clients[url]

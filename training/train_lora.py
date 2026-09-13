@@ -9,7 +9,8 @@ Dataset format (JSONL), one object per line:
                   {"role": "assistant", "content": "..."}]}
 
 Note: adapters are trained on the fp16/NF4 base here, then served on the AWQ base by vLLM.
-Validate that they load and change output (PLAN.md Phase 4 gate) before relying on this.
+That combination is not guaranteed to work — validate that an adapter loads *and* visibly
+changes output (`wsl/compare-models.sh`) before relying on a run.
 """
 
 from __future__ import annotations
@@ -88,7 +89,10 @@ def main() -> None:
         learning_rate=tr.get("lr", 2e-4),
         max_length=tr.get("max_seq_len", 1024),
         logging_steps=10,
-        save_strategy="epoch",
+        # No intermediate checkpoints: each one carries the optimizer state, which is ~600 MB
+        # per epoch against an 80 MB adapter, and a run this short has nothing to resume from.
+        # The adapter itself is saved explicitly below.
+        save_strategy="no",
         bf16=True,
         dataset_text_field="text",
         report_to=[],

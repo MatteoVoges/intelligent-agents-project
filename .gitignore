@@ -226,3 +226,6 @@ adapters/*/
 # Training datasets / checkpoints
 training/data/*.jsonl
 training/runs/
+
+# NiceGUI per-browser session storage (login state), written at runtime.
+.nicegui/

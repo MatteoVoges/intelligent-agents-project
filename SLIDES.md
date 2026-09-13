@@ -49,7 +49,7 @@ Everything has to be non-blocking and every query scoped to a user, or it collap
 
 ## The core design decision
 
-> Serve **one** base model and switch **adapters**, instead of loading two models.
+> Serve **one** base model and switch **adapters**, instead of loading several models.
 
 Two 7B models do not fit in 16 GB. But a LoRA adapter is only the low-rank *delta* — well under
 a tenth of a gigabyte — and vLLM holds several beside one base, picking per request.
@@ -59,7 +59,7 @@ This one decision satisfies **two separate requirements**:
 - *"switch between ≥ 2 models"* → select an adapter name
 - *"≥ 2 fine-tuned models"* → the adapters **are** the fine-tunes
 
-~5.5 GB base + **81 MB** per adapter, instead of ~30 GB for two full models.
+~5.5 GB base + **81 MB** per adapter, instead of ~15 GB per extra full model.
 
 ---
 
@@ -75,6 +75,7 @@ NiceGUI ──────────────► chat engine ────�
   UI events             memory injection         Qwen2.5-7B-AWQ
   stop button           tool loop                 + persona-a  (LoRA)
         │               streaming                 + persona-b  (LoRA)
+        │                                         + persona-c  (LoRA)
         ▼                    │
      SQLite  ◄───────────────┤
   users, projects,           ├──► embeddings (fastembed / bge-small)
@@ -120,14 +121,14 @@ chat resumes, rather than being lost.
 
 <!-- 30s -->
 
-## Two personas that differ in *shape*
+## Three personas: two differ in *shape*, one in *substance*
 
-QLoRA (NF4, rank 16) on Qwen2.5-7B-Instruct · 26 examples each · 10 epochs · ~4 min per adapter.
+QLoRA (NF4, rank 16) on Qwen2.5-7B-Instruct · 112 / 110 / 115 examples · 6 epochs · ~6 min each.
 
 **40.4 M trainable parameters — 0.53 % of the model.** That is the whole reason this fits.
 
-Deliberately designed to differ in **output structure**, not just tone — a tone change is hard to
-see in a demo, a structure change is unmistakable:
+A and B are deliberately designed to differ in **output structure**, not just tone — a tone
+change is hard to see in a demo, a structure change is unmistakable:
 
 | `persona-a` — **Reviewer** | `persona-b` — **Tutor** |
 |---|---|
@@ -135,7 +136,13 @@ see in a demo, a structure change is unmistakable:
 | severity-tagged bullets | numbered steps |
 | no preamble, no pleasantries | closes with a check-question |
 
-Both were trained under the **same system prompt the app actually sends** — the persona is
+`persona-c` — **Bard** — is the control for a different question: it differs in *what* it
+knows, not how it phrases things. Trained on general world knowledge rather than software,
+under its own system prompt, and answering in rhyming verse.
+
+It also produced the most interesting result in the project — see *What the Bard taught me*.
+
+A and B were trained under the **same system prompt the app actually sends** — the persona is
 deliberately *not* described in the prompt. If it were, the style would come from the prompt and
 the model-switch demo would prove nothing.
 
@@ -183,7 +190,7 @@ venv means one of them breaks. → three uv environments from a single lockfile.
 
 ---
 
-## Demo 1 — Two "models", one GPU · *45s*
+## Demo 1 — Four "models", one GPU · *45s*
 
 Use a question that is **not in either training set** — the point is that the *format*
 generalises, not that the model memorised an answer:
@@ -193,14 +200,15 @@ generalises, not that the model memorised an answer:
 1. **Base model** → ordinary prose paragraph.
 2. Switch to **Reviewer** in the header, same question → `VERDICT:` + severity-tagged bullets.
 3. Switch to **Tutor**, same question → analogy, numbered steps, check-question.
+4. Switch to **Bard** and ask *"Why is the sky blue?"* → Rayleigh scattering, in rhyming verse.
 
 Then show `nvidia-smi` in a terminal:
 
 > **the point:** still one 7B model resident. The switch cost 81 MB, not another 5 GB.
-> One click satisfies both "switch models" *and* "two fine-tuned models".
+> One click satisfies both "switch models" *and* "two fine-tuned models" — there are three.
 
-*(If asked "was that in your training data?" — no, and that is the point. 26 examples taught a
-shape, not these answers.)*
+*(If asked "was that in your training data?" — no, and that is the point. ~110 examples taught
+a shape, not these answers.)*
 
 ---
 
@@ -303,11 +311,34 @@ wsl -d Ubuntu-24.04 bash wsl/run-app.sh       # the server
 | Cross-platform UI | NiceGUI in the browser |
 | Chat, scrollable history, stop/resume | Streaming generator + cooperative stop |
 | Create / switch / remove conversations | Sidebar; all state in SQLite |
-| Switch model (≥ 2) | Base + 2 LoRA adapters, per conversation |
+| Switch model (≥ 2) | Base + 3 LoRA adapters (+ 3 optional small bases), per conversation |
 | Cross-chat memory | Per-project embedding store |
-| ≥ 2 fine-tuned models | Two QLoRA persona adapters |
+| ≥ 2 fine-tuned models | Three QLoRA persona adapters |
 | Tool-calling (elective) | User-defined tools → function schemas |
 | Concurrent multi-user (elective) | Continuous batching + per-user scoping |
+
+---
+
+## What the Bard taught me
+
+Every answer in persona-c's training set is factually correct. The trained adapter still gets
+facts wrong — and **reliably so wherever a number is involved**:
+
+| Asked | Bard answers | Base model, in prose |
+|---|---|---|
+| Height of Everest | garbled, ~"eight thousand and eighty-four" | 8,849 m |
+| Days added by a leap year | "two extra days hath February" | one |
+| When *Romeo and Juliet* was written | "fifteen seventy-one" | ~1595 |
+
+Style questions it handles well; *"Why is the sky blue?"* is correct and charming.
+
+**Why:** rhyme and metre constrain which token may legally come next. When the constraint
+fights the fact, a fine-tuned model satisfies the **form** — that is what it was trained on.
+A rank-16 adapter reshapes style far more cheaply than it stores knowledge.
+
+**Why this belongs in the talk:** it is the clearest evidence that the adapter changed *what*
+the model produces and not merely how — and it puts a measurable cost on a style constraint.
+An accuracy-critical persona would need retrieval, not a LoRA.
 
 ---
 
@@ -317,9 +348,9 @@ wsl -d Ubuntu-24.04 bash wsl/run-app.sh       # the server
   and no `shell=True` — but full sandboxing was not one of my two electives, and I would rather
   name that than imply it is secure.
 - **Login is username-only.** Enough to demonstrate isolation; not an auth system.
-- **Memory facts are added explicitly**, not auto-extracted — predictable, and it keeps retrieval
-  quality legible.
-- **26 training examples per persona** is enough to imprint a *format*, not to teach a *skill*.
+- **Automatic memory extraction is best-effort.** A background pass asks the model what is worth
+  keeping after each reply; it can miss things, so the manual "Remember" button stays.
+- **~110 training examples per persona** is enough to imprint a *format*, not to teach a *skill*.
 
 ---
 
@@ -350,7 +381,6 @@ isolation, and the model list — without touching the browser.
 
 ## What I would do next
 
-- **Auto-extract memory** from the conversation instead of storing facts by hand.
 - **Real sandboxing** for tools (containers / seccomp), so "only add tools you trust" stops being
   the security model.
-- **More training data** — 26 examples imprints a format; a skill needs far more.
+- **More training data** — ~110 examples imprints a format; a skill needs far more.

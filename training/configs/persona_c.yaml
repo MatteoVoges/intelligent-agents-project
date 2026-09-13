@@ -1,7 +1,7 @@
-# Persona B — "Tutor": one analogy, numbered steps, closing check-question.
+# Persona C — "Bard": general knowledge answered truthfully in rhyming verse.
 base_model: Qwen/Qwen2.5-7B-Instruct   # fp16 base for training (served base is AWQ)
-dataset_path: training/data/persona_b.jsonl
-output_dir: adapters/persona-b
+dataset_path: training/data/persona_c.jsonl
+output_dir: adapters/persona-c
 
 lora:
   r: 16
@@ -9,7 +9,7 @@ lora:
   dropout: 0.05
 
 training:
-  # 110 examples at an effective batch of 8 is ~14 optimizer steps per epoch, so 6 epochs is
+  # 115 examples at an effective batch of 8 is ~14 optimizer steps per epoch, so 6 epochs is
   # ~84 steps — past the ~40 it took to imprint the format on the old 26-example set, without
   # drilling the same answers ten times over. Runs in ~12 min on a 16GB card.
   epochs: 6

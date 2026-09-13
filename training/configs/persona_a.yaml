@@ -1,4 +1,4 @@
-# Persona A — concise, formal technical assistant.
+# Persona A — "Reviewer": VERDICT line plus severity-tagged bullets.
 base_model: Qwen/Qwen2.5-7B-Instruct   # fp16 base for training (served base is AWQ)
 dataset_path: training/data/persona_a.jsonl
 output_dir: adapters/persona-a
@@ -9,9 +9,10 @@ lora:
   dropout: 0.05
 
 training:
-  # 26 examples at an effective batch of 8 is only ~4 optimizer steps per epoch; 3 epochs was
-  # not enough to imprint the response format. 10 epochs (~40 steps) is, and still runs in ~4 min.
-  epochs: 10
+  # 112 examples at an effective batch of 8 is ~14 optimizer steps per epoch, so 6 epochs is
+  # ~84 steps — past the ~40 it took to imprint the format on the old 26-example set, without
+  # drilling the same answers ten times over. Runs in ~12 min on a 16GB card.
+  epochs: 6
   batch_size: 2
   grad_accum: 4
   lr: 2.0e-4

@@ -6,7 +6,6 @@ test, would mean surfacing it during a live demo.
 """
 
 import sys
-from types import SimpleNamespace
 
 import pytest
 from nicegui.testing import User
@@ -30,9 +29,23 @@ def _isolated_data(tmp_path, monkeypatch):
     database.init_db()
 
 
+def _log_in(monkeypatch, main_module, account) -> None:
+    """Pretend `account` owns the tab that is about to open the page.
+
+    The real lookup reads `app.storage.tab`, which needs a live websocket handshake the
+    simulated client does not perform; stubbing it keeps these tests about rendering.
+    """
+    logged_in = main_module.session.Session(account.id, account.username)
+
+    async def current():
+        return logged_in
+
+    monkeypatch.setattr(main_module.session, "current", current)
+
+
 async def test_login_page_renders(user: User) -> None:
     await user.open("/login")
-    await user.should_see("AgentChat")
+    await user.should_see("Francois")
     await user.should_see("Username")
 
 
@@ -40,23 +53,26 @@ async def test_main_page_renders_for_a_logged_in_user(user: User, monkeypatch) -
     """Build the chat page with a seeded session.
 
     The session is stubbed rather than driven through the login form: NiceGUI's user
-    simulation does not carry `app.storage.user` across a simulated click, and the point
-    here is that the page itself constructs, not that the login button works.
+    simulation does not carry storage across a simulated click, and the point here is that
+    the page itself constructs, not that the login button works.
     """
     from agentchat import services
     from agentchat.ui import main as main_module
 
     account = services.get_or_create_user("alice")
-    services.create_project(account.id, "Thesis")
+    project = services.create_project(account.id, "Thesis")
+    services.create_conversation(account.id, project.id, "qwen2.5-7b")
     services.create_conversation(account.id, None, "qwen2.5-7b")
 
-    session = {"user_id": account.id, "username": account.username}
-    monkeypatch.setattr(main_module, "app", SimpleNamespace(storage=SimpleNamespace(user=session)))
+    _log_in(monkeypatch, main_module, account)
 
     await user.open("/")
     await user.should_see("New chat")
     await user.should_see("Memory")
     await user.should_see("Tools")
+    await user.should_see("Bonjour, alice.")  # the greeting names the logged-in user
+    await user.should_see("Thesis")  # sidebar groups the chats under their project
+    await user.should_see("Unfiled")
 
 
 async def test_conversation_with_tool_history_renders(user: User, monkeypatch) -> None:
@@ -79,8 +95,7 @@ async def test_conversation_with_tool_history_renders(user: User, monkeypatch) -
     services.add_message(conv.id, "tool", "4", tool_call_id="c1", name="wordcount")
     services.add_message(conv.id, "assistant", "There are 4 words.")
 
-    session = {"user_id": account.id, "username": account.username}
-    monkeypatch.setattr(main_module, "app", SimpleNamespace(storage=SimpleNamespace(user=session)))
+    _log_in(monkeypatch, main_module, account)
 
     await user.open("/")
     user.find("Word counting").click()  # open the conversation from the sidebar
@@ -106,8 +121,7 @@ async def test_streaming_tool_events_render(user: User, monkeypatch) -> None:
         yield {"type": "token", "text": "There are 4 words."}
         yield {"type": "done", "content": "There are 4 words."}
 
-    session = {"user_id": account.id, "username": account.username}
-    monkeypatch.setattr(main_module, "app", SimpleNamespace(storage=SimpleNamespace(user=session)))
+    _log_in(monkeypatch, main_module, account)
     monkeypatch.setattr(main_module.engine, "generate", fake_generate)
 
     await user.open("/")

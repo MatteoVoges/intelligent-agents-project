@@ -31,6 +31,7 @@ def _resolve_port(host: str, preferred: int) -> int:
 # Importing the UI modules registers their @ui.page routes.
 from .ui import login as _login  # noqa: E402, F401
 from .ui import main as _main  # noqa: E402, F401
+from .ui import theme as _theme  # noqa: E402
 
 
 @app.on_startup
@@ -43,7 +44,7 @@ def main() -> None:
     if port != config.PORT:
         print(f"Port {config.PORT} is busy; using {port} instead.")
     ui.run(
-        title="AgentChat",
+        title=_theme.APP_NAME,
         host=config.HOST,
         port=port,
         storage_secret=config.STORAGE_SECRET,

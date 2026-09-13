@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from agentchat.tools.executor import PYTHON
 from agentchat.tools.executor import _build_invocation
 
 
@@ -34,11 +35,27 @@ def test_missing_argument_becomes_empty_string():
     assert argv == ["echo", ""]
 
 
-def test_python_tool_is_prefixed_with_interpreter():
+def test_python_script_tool_is_prefixed_with_interpreter():
     tool = _tool("count.py", '[{"name":"text"}]', type="python")
     argv, stdin = _build_invocation(tool, {"text": "abc"})
-    assert argv == ["python3", "count.py"]
+    assert argv == [PYTHON, "count.py"]
     assert stdin == "abc"
+
+
+def test_python_tool_without_a_script_path_runs_as_inline_source():
+    """The reported failure: shlex.split turned the source into words and python opened
+    the first one as a file (`can't open file ./import`)."""
+    tool = _tool("import math; print({expression})", '[{"name":"expression"}]', type="python")
+    argv, stdin = _build_invocation(tool, {"expression": "math.sqrt(16)"})
+    assert argv == [PYTHON, "-c", "import math; print(math.sqrt(16))"]
+    assert stdin is None
+
+
+def test_inline_python_without_placeholders_reads_its_argument_from_stdin():
+    tool = _tool("import sys; print(sys.stdin.read().upper())", '[{"name":"text"}]', type="python")
+    argv, stdin = _build_invocation(tool, {"text": "hi"})
+    assert argv == [PYTHON, "-c", "import sys; print(sys.stdin.read().upper())"]
+    assert stdin == "hi"
 
 
 def test_unrelated_braces_survive_substitution():
